@@ -1,0 +1,165 @@
+rules_version = '2';
+
+// SanoCondominio — Reglas de seguridad multisede
+// - Cada sede (cuenta) solo accede a sus propios datos en tenants/{uid}.
+// - El administrador general crea, congela, renueva y elimina sedes.
+// - Una sede congelada o con el plan vencido no puede leer ni escribir sus datos.
+// - Las demos (sesión anónima) caducan a los 30 minutos: después solo pueden borrar sus datos.
+// - portals/{código}: portal público de cada unidad (solo su deuda, recibos, pagos y lo publicado para todos); se lee por código exacto, sin listar.
+// - inbox/{id}: pagos reportados, solicitudes, reservas y votos desde el portal; cualquiera con un portal activo puede crearlos (validados),
+//   solo la administración dueña los ve, los procesa y los borra.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return signedIn()
+        && request.auth.token.email == 'admin@sanocondominio.app'
+        && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+
+    function isAnon() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
+    function isOwner(tenantId) {
+      return signedIn() && request.auth.uid == tenantId;
+    }
+
+    function tenantData(tenantId) {
+      return get(/databases/$(database)/documents/tenants/$(tenantId)).data;
+    }
+
+    // Activa = no congelada, no eliminada y con el plan vigente (si tiene fecha de vencimiento)
+    function tenantActive(tenantId) {
+      let t = tenantData(tenantId);
+      let paid = t.get('paidUntil', null);
+      return t.get('active', true) == true
+        && t.get('deleted', false) != true
+        && (paid == null || paid > request.time);
+    }
+
+    // Una demo solo puede crear/modificar datos mientras no haya vencido
+    function demoValid(tenantId) {
+      let t = tenantData(tenantId);
+      return t.get('demo', false) != true || t.expiresAt > request.time;
+    }
+
+    function ownerCanWrite() {
+      return signedIn() && tenantActive(request.auth.uid) && demoValid(request.auth.uid);
+    }
+
+    // Usuario → correo (para iniciar sesión con el nombre de usuario)
+    match /usernames/{username} {
+      allow get: if true;
+      allow list: if false;
+      allow write: if isSuperAdmin();
+    }
+
+    // Avisos generales del administrador para todas las sedes
+    match /system/{docId} {
+      allow read: if signedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    // Portal público del propietario: se lee por código exacto (nunca se listan)
+    match /portals/{code} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if isSuperAdmin()
+        || (signedIn() && code.matches('^[A-Z0-9]{6,12}$')
+            && request.resource.data.tenantId == request.auth.uid && ownerCanWrite());
+      allow update: if isSuperAdmin()
+        || (signedIn() && resource.data.tenantId == request.auth.uid
+            && request.resource.data.tenantId == request.auth.uid && ownerCanWrite());
+      allow delete: if isSuperAdmin() || (signedIn() && resource.data.tenantId == request.auth.uid);
+    }
+
+    // Bandeja: pagos reportados, solicitudes, reservas y votos que llegan desde el portal
+    function shortStr(d, k, max) {
+      return d.get(k, '') is string && d.get(k, '').size() <= max;
+    }
+    function optNum(d, k) {
+      return d.get(k, null) == null || (d.get(k, 0) is number && d.get(k, 0) >= 0 && d.get(k, 0) <= 1000000000000);
+    }
+    function validInbox(d) {
+      return d.keys().hasOnly(['tenantId', 'code', 'unitId', 'unitCode', 'buildingId', 'type', 'status', 'createdAt', 'name', 'phone',
+          'amount', 'amountBs', 'rate', 'method', 'date', 'bank', 'reference', 'note',
+          'category', 'text', 'areaId', 'areaName', 'from', 'to', 'guests', 'voteId', 'option'])
+        && d.keys().hasAll(['tenantId', 'code', 'unitId', 'type', 'status', 'createdAt'])
+        && d.tenantId is string && d.tenantId.size() > 0 && d.tenantId.size() <= 128
+        && d.code is string && d.code.size() >= 6 && d.code.size() <= 12
+        && d.unitId is string && d.unitId.size() <= 64
+        && shortStr(d, 'unitCode', 20) && shortStr(d, 'buildingId', 64)
+        && d.status == 'nueva'
+        && d.createdAt is string && d.createdAt.size() <= 30
+        && shortStr(d, 'name', 60) && shortStr(d, 'phone', 20) && shortStr(d, 'note', 140)
+        && (
+          (d.type == 'pago' && d.amount is number && d.amount > 0 && d.amount <= 1000000000
+            && optNum(d, 'amountBs') && optNum(d, 'rate')
+            && shortStr(d, 'method', 30) && shortStr(d, 'date', 10) && shortStr(d, 'bank', 40)
+            && d.reference is string && d.reference.size() >= 3 && d.reference.size() <= 30)
+          || (d.type == 'solicitud' && shortStr(d, 'category', 30)
+            && d.text is string && d.text.size() >= 4 && d.text.size() <= 600)
+          || (d.type == 'reserva' && d.areaId is string && d.areaId.size() <= 40 && shortStr(d, 'areaName', 60)
+            && d.date is string && d.date.size() == 10 && shortStr(d, 'from', 5) && shortStr(d, 'to', 5)
+            && (d.get('guests', 0) is int && d.get('guests', 0) >= 0 && d.get('guests', 0) <= 9999))
+          || (d.type == 'voto' && d.voteId is string && d.voteId.size() <= 64
+            && d.option is string && d.option.size() >= 1 && d.option.size() <= 60)
+        );
+    }
+    // El portal debe existir, estar activo y pertenecer a esa cuenta y unidad
+    function portalAllows(d) {
+      let path = /databases/$(database)/documents/portals/$(d.code);
+      let p = get(path).data;
+      return exists(path) && p.tenantId == d.tenantId && p.unitId == d.unitId && p.get('active', true) == true
+        && (d.type != 'pago' || p.allow.reports == true)
+        && (d.type != 'solicitud' || p.allow.requests == true)
+        && (d.type != 'reserva' || p.allow.bookings == true);
+    }
+    match /inbox/{id} {
+      allow create: if (validInbox(request.resource.data) && portalAllows(request.resource.data))
+        || (signedIn() && request.resource.data.tenantId == request.auth.uid && ownerCanWrite());
+      allow get, list: if isSuperAdmin() || (signedIn() && resource.data.tenantId == request.auth.uid);
+      allow update: if isSuperAdmin()
+        || (signedIn() && resource.data.tenantId == request.auth.uid
+            && request.resource.data.tenantId == resource.data.tenantId && ownerCanWrite());
+      allow delete: if isSuperAdmin() || (signedIn() && resource.data.tenantId == request.auth.uid);
+    }
+
+    match /tenants/{tenantId} {
+      allow get: if isSuperAdmin() || isOwner(tenantId);
+      allow list: if isSuperAdmin();
+
+      // Las sedes las crea el administrador. Una sesión anónima solo puede crear su demo (máx. 31 min).
+      allow create: if isSuperAdmin()
+        || (isOwner(tenantId) && isAnon()
+            && request.resource.data.demo == true
+            && request.resource.data.active == true
+            && request.resource.data.ownerUid == request.auth.uid
+            && request.resource.data.expiresAt <= request.time + duration.value(31, 'm'));
+
+      // La sede solo puede cambiar su nombre visible; estado, plan y vencimiento los maneja el administrador.
+      allow update: if isSuperAdmin()
+        || (isOwner(tenantId) && tenantActive(tenantId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'updatedAt']));
+
+      allow delete: if isSuperAdmin() || (isOwner(tenantId) && resource.data.get('demo', false) == true);
+
+      // Datos de la administración: edificios, unidades, gastos, recibos, pagos, fondos, comunicados, votaciones...
+      match /{collection}/{docId} {
+        allow read: if isSuperAdmin() || (isOwner(tenantId) && tenantActive(tenantId));
+        allow delete: if isSuperAdmin() || (isOwner(tenantId) && (tenantActive(tenantId) || tenantData(tenantId).get('demo', false) == true));
+        allow create, update: if isSuperAdmin() || (isOwner(tenantId) && tenantActive(tenantId) && demoValid(tenantId));
+      }
+    }
+
+    // Cualquier otra ruta queda bloqueada.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
