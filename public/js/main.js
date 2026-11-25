@@ -9,7 +9,7 @@ import { openCountryPicker, salesWa, SALES_PHONE_FMT } from './shared.js';
 import { isStandalone, platform, bindInstallButtons } from './install.js';
 import { buildingOptions } from './unit.js';
 
-export const VERSION = '1.0.1';
+export const VERSION = '1.0.2';
 
 const ROUTES = {
   inicio: { title: 'Inicio', icon: 'home', group: 'Condominio', load: () => import('./views/dashboard.js') },
@@ -249,16 +249,16 @@ async function afterEnter() {
 let pubOff = null;
 function startPublisher() {
   pubOff?.();
-  if (session.isSuper && !store.isDemo) return;
   import('./ops.js').then(({ publishPortals, resetPublished, processInboxVotes, setPublishScheduler }) => {
     resetPublished();
-    const run = debounce(() => publishPortals().catch((e) => console.warn('[portal]', e?.code || e)), 3500);
+    const run = debounce(() => publishPortals().catch((e) => console.warn('[portal]', e?.code || e)), 2000);
     setPublishScheduler(run);
-    run();
+    // Publica inmediatamente al entrar (tanto sede como admin) para que todos los QR funcionen al instante
+    publishPortals().catch((e) => console.warn('[portal]', e?.code || e));
     const votes = debounce(() => processInboxVotes().catch((e) => console.warn('[votos]', e?.code || e)), 1500);
-    votes();
+    if (!session.isSuper || store.isDemo) votes();
     const offs = ['units', 'notices', 'votes', 'bookings', 'closings', 'settings', 'payments', 'funds', 'buildings'].map((k) => store.on(k, run));
-    offs.push(store.on('inbox', () => { run(); votes(); }));
+    offs.push(store.on('inbox', () => { run(); if (!session.isSuper || store.isDemo) votes(); }));
     const iv = setInterval(run, 10 * 60000);
     pubOff = () => { offs.forEach((o) => o()); clearInterval(iv); setPublishScheduler(null); pubOff = null; };
   });

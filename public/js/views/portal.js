@@ -24,7 +24,8 @@ export async function mount(root) {
     return;
   }
   try { applyLocale(P.country || 'VE', P.currency || null); } catch (_) {}
-  if (P.rate?.rate) setFx({ enabled: true, ...P.rate });
+  const rVal = typeof P.rate === 'number' ? P.rate : Number(P.rate?.rate) || 0;
+  if (rVal > 0) setFx({ enabled: true, sym: P.fxSym || P.rate?.sym || 'Bs', rate: rVal });
   LS('sc_portal', code);
   document.title = `${P.unit} · ${P.building}`;
   let tab = 'inicio';

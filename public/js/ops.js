@@ -63,20 +63,28 @@ export async function saveUnit(data, id = null) {
   const dup = store.units.find((u) => u.id !== ref.id && u.buildingId === d.buildingId && (u.code || '') === d.code && u.active !== false);
   if (dup) throw new Error(`Ya existe la unidad ${d.code} en este edificio.`);
   const b = store.batch(); b.set(ref, d, { merge: true }); await store.commit(b);
-  return { id: ref.id, ...(prev || {}), ...d };
+  const saved = { id: ref.id, ...(prev || {}), ...d };
+  if (saved.active !== false && saved.portalCode) await publishUnitPortal(saved).catch((e) => console.warn('[portal]', e?.code || e));
+  return saved;
 }
 export async function setUnitActive(u, active) {
   const b = store.batch(); b.set(store.ref('units', u.id), { active, updatedAt: nowISO() }, { merge: true });
   if (!active && u.portalCode) b.delete(store.portalRef(u.portalCode));
   await store.commit(b);
+  if (active && u.portalCode) await publishUnitPortal({ ...u, active: true }).catch(() => {});
 }
 export async function renewPortalCode(u) {
   const code = genCode(8);
+  const updated = { ...u, portalCode: code };
+  const docData = JSON.parse(JSON.stringify(portalDoc(updated)));
   const b = store.batch();
   if (u.portalCode) b.delete(store.portalRef(u.portalCode));
   b.set(store.ref('units', u.id), { portalCode: code, updatedAt: nowISO() }, { merge: true });
+  if (updated.active !== false) b.set(store.portalRef(code), docData);
   await store.commit(b);
-  resetPublished();
+  published.delete(u.portalCode);
+  const { updatedAt, ...cmp } = docData;
+  published.set(code, JSON.stringify(cmp));
   return code;
 }
 /** Reparte el 100% de la alícuota: en partes iguales o proporcional a los metros cuadrados */
@@ -104,6 +112,7 @@ export async function setOpeningBalance(u, amount, note = 'Saldo inicial') {
 export async function importUnits(buildingId, rows) {
   let created = 0, updated = 0;
   const ops = [];
+  const toPublish = [];
   for (const r of rows) {
     const code = str(r.code, 20).toUpperCase();
     if (!code) continue;
@@ -116,10 +125,23 @@ export async function importUnits(buildingId, rows) {
       if (debt > 0) Object.assign(d, { billed: debt, ledger: [{ id: 'saldo', p: addMonths(currentPeriod(), -1), c: 0, t: debt, n: 'Saldo anterior', d: todayKey(), k: 'extra' }] });
       else if (debt < 0) d.paid = -debt;
       created++;
-    } else updated++;
+    } else {
+      if (!prev.portalCode) d.portalCode = genCode(8);
+      updated++;
+    }
+    const merged = { id: ref.id, ...(prev || {}), ...d };
     ops.push((b) => b.set(ref, d, { merge: true }));
+    if (merged.active !== false && merged.portalCode) toPublish.push(merged);
   }
   await chunked(ops);
+  if (toPublish.length) {
+    const pOps = toPublish.map((u) => {
+      const pd = JSON.parse(JSON.stringify(portalDoc(u)));
+      return { code: u.portalCode, pd, fn: (b) => b.set(store.portalRef(u.portalCode), pd) };
+    });
+    await chunked(pOps.map((x) => x.fn), 60).catch((e) => console.warn('[portal]', e?.code || e));
+    pOps.forEach(({ code, pd }) => { const { updatedAt, ...cmp } = pd; published.set(code, JSON.stringify(cmp)); });
+  }
   return { created, updated };
 }
 
@@ -474,22 +496,47 @@ let published = new Map();
 export function resetPublished() { published = new Map(); schedulePublish?.(); }
 let schedulePublish = null;
 export function setPublishScheduler(fn) { schedulePublish = fn; }
+/** Publica de inmediato el portal público de una sola unidad (ej. al abrir su QR o crearla) */
+export async function publishUnitPortal(u) {
+  if (!store.tenantId || !u) return null;
+  let unit = u;
+  if (!unit.portalCode) {
+    const code = genCode(8);
+    const b0 = store.batch();
+    b0.set(store.ref('units', unit.id), { portalCode: code, updatedAt: nowISO() }, { merge: true });
+    await store.commit(b0);
+    unit = { ...unit, portalCode: code };
+  }
+  const d = JSON.parse(JSON.stringify(portalDoc(unit)));
+  const { updatedAt, ...cmp } = d;
+  const h = JSON.stringify(cmp);
+  const b = store.batch();
+  b.set(store.portalRef(unit.portalCode), d);
+  await store.commit(b);
+  published.set(unit.portalCode, h);
+  return unit.portalCode;
+}
 /** Publica (solo lo que cambió) el portal de cada unidad activa */
 export async function publishPortals() {
   if (!store.tenantId || !store.ready) return 0;
   const ops = [];
   for (const u of store.liveUnits) {
-    if (!u.portalCode) continue;
+    let unit = u;
+    if (!unit.portalCode) {
+      const code = genCode(8);
+      ops.push({ code, h: '', fn: (b) => b.set(store.ref('units', unit.id), { portalCode: code, updatedAt: nowISO() }, { merge: true }) });
+      unit = { ...unit, portalCode: code };
+    }
     // Sin campos undefined (Firestore los rechaza) y comparación por contenido para publicar solo lo que cambió
-    const d = JSON.parse(JSON.stringify(portalDoc(u)));
+    const d = JSON.parse(JSON.stringify(portalDoc(unit)));
     const { updatedAt, ...cmp } = d;
     const h = JSON.stringify(cmp);
-    if (published.get(u.portalCode) === h) continue;
-    ops.push({ code: u.portalCode, h, fn: (b) => b.set(store.portalRef(u.portalCode), d) });
+    if (published.get(unit.portalCode) === h) continue;
+    ops.push({ code: unit.portalCode, h, fn: (b) => b.set(store.portalRef(unit.portalCode), d) });
   }
   if (!ops.length) return 0;
   await chunked(ops.map((o) => o.fn), 60);
-  ops.forEach((o) => published.set(o.code, o.h)); // solo después de guardarse bien: si falla, se reintenta
+  ops.forEach((o) => { if (o.h) published.set(o.code, o.h); }); // solo después de guardarse bien: si falla, se reintenta
   return ops.length;
 }
 

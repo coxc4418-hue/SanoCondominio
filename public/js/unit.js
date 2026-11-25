@@ -3,7 +3,7 @@ import { store } from './store.js';
 import { esc, usd, bs, num, fmtDate, toast, openModal, setBusy, parseNum, normalize, round2, todayKey, PAY_METHODS, methodLabel, loc, fx, emptyState, confirmDialog, promptDialog, fmtDateTime } from './utils.js';
 import { icon } from './icons.js';
 import { UNIT_TYPES, OCCUPANCY, unitBalance, ledgerStatus, openCharges, monthsOwed, debtTone, debtLabel, periodName, badge, PAY_STATUS, REQUEST_CATS, REQUEST_STATUS, isSolvent } from './condo.js';
-import { saveUnit, registerPayment, addUnitCharge, setUnitActive, renewPortalCode, voidPayment, setOpeningBalance, createRequest } from './ops.js';
+import { saveUnit, registerPayment, addUnitCharge, setUnitActive, renewPortalCode, voidPayment, setOpeningBalance, createRequest, publishUnitPortal } from './ops.js';
 import { waUnit, PORTAL_URL, qrDataURL, printStatement, printSolvency, printPayment, receiptHTML, printReceipts } from './shared.js';
 import { isVE } from './bcv.js';
 
@@ -193,19 +193,21 @@ export function paidDone(p) {
 // PORTAL: QR y enlace
 // ======================================================================
 export async function portalModal(u) {
-  const url = PORTAL_URL(u);
+  const code = await publishUnitPortal(u).catch(() => u.portalCode);
+  const unit = code && code !== u.portalCode ? { ...u, portalCode: code } : u;
+  const url = PORTAL_URL(unit);
   const qr = await qrDataURL(url, 6);
   const m = openModal({
-    title: `Portal de la unidad ${esc(u.code)}`, size: 'sm',
+    title: `Portal de la unidad ${esc(unit.code)}`, size: 'sm',
     sub: 'El propietario ve sus recibos y la relación de gastos, reporta pagos, envía solicitudes, reserva áreas y vota. Sin usuario ni contraseña: solo con este enlace.',
-    body: `<div class="center stack" style="align-items:center"><img src="${qr}" alt="QR" width="220" height="220" style="image-rendering:pixelated;border-radius:12px;background:#fff;padding:6px"><code class="mono" style="font-size:20px;letter-spacing:.15em">${esc(u.portalCode)}</code><input class="input input-ro small" readonly value="${esc(url)}"></div>`,
-    footer: `<button class="btn btn-ghost" data-new>${icon('refresh')} Cambiar código</button><button class="btn btn-secondary" data-copy>${icon('copy')} Copiar</button><a class="btn btn-secondary" href="${esc(url)}" target="_blank" rel="noopener">${icon('external')} Abrir</a>${u.ownerPhone ? `<button class="btn btn-whatsapp" data-wa>${icon('whatsapp')} Enviar</button>` : ''}`
+    body: `<div class="center stack" style="align-items:center"><img src="${qr}" alt="QR" width="220" height="220" style="image-rendering:pixelated;border-radius:12px;background:#fff;padding:6px"><code class="mono" style="font-size:20px;letter-spacing:.15em">${esc(unit.portalCode)}</code><input class="input input-ro small" readonly value="${esc(url)}"></div>`,
+    footer: `<button class="btn btn-ghost" data-new>${icon('refresh')} Cambiar código</button><button class="btn btn-secondary" data-copy>${icon('copy')} Copiar</button><a class="btn btn-secondary" href="${esc(url)}" target="_blank" rel="noopener">${icon('external')} Abrir</a>${unit.ownerPhone ? `<button class="btn btn-whatsapp" data-wa>${icon('whatsapp')} Enviar</button>` : ''}`
   });
   m.el.querySelector('[data-copy]').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('Enlace copiado'); } catch (_) { toast('No se pudo copiar', 'warning'); } };
-  m.el.querySelector('[data-wa]')?.addEventListener('click', () => waUnit('portal', { unit: u }));
+  m.el.querySelector('[data-wa]')?.addEventListener('click', () => waUnit('portal', { unit }));
   m.el.querySelector('[data-new]').onclick = async () => {
     if (!(await confirmDialog({ title: 'Cambiar el código del portal', message: 'El enlace anterior dejará de funcionar (útil si la unidad se vendió o cambió de inquilino).', confirmText: 'Cambiar' }))) return;
-    await renewPortalCode(u); m.close(); toast('Código renovado'); portalModal(store.unit(u.id));
+    await renewPortalCode(unit); m.close(); toast('Código renovado'); portalModal(store.unit(unit.id) || unit);
   };
 }
 

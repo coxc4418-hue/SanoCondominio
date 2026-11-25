@@ -135,6 +135,7 @@ export function mount(el, { params }) {
   $('#u-wa').onclick = async () => {
     const list = store.scopeUnits.filter((u) => u.ownerPhone);
     if (!list.length) { toast('Ninguna unidad tiene teléfono cargado.', 'warning'); return; }
+    import('../ops.js').then(({ publishPortals }) => publishPortals().catch(() => {}));
     const m = openModal({
       title: 'Enviar el portal a cada propietario', size: 'md', sub: 'Toca cada uno: se abre WhatsApp con su enlace personal listo para enviar.',
       body: `<div class="list" style="max-height:55vh;overflow:auto">${list.map((u) => `<div class="list-item">${unitAvatar(u)}<div class="grow"><b>${esc(u.code)}</b><div class="t-sub">${esc(u.ownerName || '')}</div></div><button class="btn btn-whatsapp btn-sm" data-s="${u.id}">${icon('whatsapp')} Enviar</button></div>`).join('')}</div>`

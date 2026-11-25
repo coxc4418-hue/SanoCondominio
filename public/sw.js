@@ -1,5 +1,5 @@
 // SanoCondominio — Service Worker (PWA, funcionamiento sin conexión)
-const VERSION = 'sanocondominio-v1.0.1';
+const VERSION = 'sanocondominio-v1.0.2';
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 const VIEWS = ['admin', 'billing', 'bookings', 'collect', 'dashboard', 'expenses', 'funds', 'notices', 'portal', 'reports', 'requests', 'search', 'settings', 'units', 'votes'];
 const SHELL = [
