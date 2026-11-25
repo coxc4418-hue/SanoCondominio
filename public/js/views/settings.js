@@ -34,8 +34,8 @@ export function buildingWizard({ first = false, building = null } = {}) {
           <div class="form-grid-3"><div class="field"><label>Pisos</label><input class="input" name="floors" inputmode="numeric" placeholder="Ej.: 8"></div><div class="field"><label>Unidades por piso</label><input class="input" name="per" inputmode="numeric" placeholder="Ej.: 4"></div><div class="field"><label>Letras o números</label><select class="input select" name="naming"><option value="letras">1-A, 1-B, 2-A…</option><option value="numeros">101, 102, 201…</option><option value="casas">Casa 1, Casa 2…</option></select></div></div>
           <span class="hint">Se crean con alícuotas iguales; después cargas los propietarios o importas desde Excel.</span></div>`}
         <div class="error-msg" data-err></div></form>`,
-      footer: `${first ? '' : '<button class="btn btn-secondary" data-close>Cancelar</button>'}<button class="btn btn-primary btn-lg" data-ok>${icon('check')} ${building ? 'Guardar' : 'Crear edificio'}</button>`,
-      dismissible: !first,
+      footer: `<button class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary btn-lg" data-ok>${icon('check')} ${building ? 'Guardar' : 'Crear edificio'}</button>`,
+      dismissible: true,
       onClose: () => { if (!done) resolve(null); }
     });
     let type = b.type || 'edificio';

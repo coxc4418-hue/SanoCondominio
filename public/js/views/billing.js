@@ -83,7 +83,7 @@ export function mount(el, { params, navigate }) {
   function afterEmit() {
     const m = openModal({
       size: 'sm', body: `<div class="center stack" style="padding:16px 0;align-items:center"><div class="kpi-icon tone-success" style="width:64px;height:64px;border-radius:20px">${icon('check')}</div><h3 style="margin:0">¡Recibos emitidos!</h3><p class="muted" style="margin:0">Ya están en el portal de cada propietario. ¿Qué hacemos ahora?</p></div>`,
-      footer: `<button class="btn btn-secondary" data-pr>${icon('print')} Imprimir</button><button class="btn btn-whatsapp" data-wa>${icon('whatsapp')} Enviar por WhatsApp</button>`
+      footer: `<button class="btn btn-ghost" data-close>Cerrar</button><button class="btn btn-secondary" data-pr>${icon('print')} Imprimir</button><button class="btn btn-whatsapp" data-wa>${icon('whatsapp')} Enviar por WhatsApp</button>`
     });
     m.el.querySelector('[data-pr]').onclick = async () => { m.close(); await ensureReceipts(); printReceipts(receipts, store.closing(bldId(), period)); };
     m.el.querySelector('[data-wa]').onclick = async () => { m.close(); sendAll(); };

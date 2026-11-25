@@ -26,9 +26,9 @@ export function openSearch() {
     const digits = raw.replace(/\D/g, '');
     if (!t) { res.innerHTML = hint(); bind(); return; }
     const units = store.liveUnits.filter((u) => {
-      const hay = normalize([u.code, u.ownerName, u.residentName, u.ownerDoc, u.floor, store.bldName(u.buildingId), u.parking, u.portalCode].filter(Boolean).join(' '));
+      const hay = normalize([u.code, u.ownerName, u.residentName, u.ownerIdDoc, u.floor, store.bldName(u.buildingId), u.parking, u.portalCode].filter(Boolean).join(' '));
       if (hay.includes(t)) return true;
-      if (digits.length >= 4 && [u.ownerPhone, u.residentPhone, u.ownerDoc].some((p) => String(p || '').replace(/\D/g, '').includes(digits))) return true;
+      if (digits.length >= 4 && [u.ownerPhone, u.residentPhone, u.ownerIdDoc].some((p) => String(p || '').replace(/\D/g, '').includes(digits))) return true;
       return false;
     }).sort((a, b) => (normalize(a.code) === t ? -1 : normalize(b.code) === t ? 1 : 0)).slice(0, 12);
     const pays = store.payments.filter((p) => normalize([p.number, p.reference].join(' ')).includes(t)).slice(0, 6);

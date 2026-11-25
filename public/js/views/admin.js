@@ -88,7 +88,7 @@ export function mount(el, { enter, logout }) {
         const sales = await tenantSalesSince(t.id, since);
         const open = null;
         const ok = sales.filter((s) => s.status !== 'voided');
-        stats[t.id] = { total: ok.reduce((a, s) => a + (s.received || 0), 0), count: ok.length, open };
+        stats[t.id] = { total: ok.reduce((a, s) => a + (Number(s.total ?? s.amount ?? s.received) || 0), 0), count: ok.length, open };
       } catch (_) { stats[t.id] = { total: 0, count: 0, open: null }; }
     }));
     if (alive) render();
@@ -306,8 +306,8 @@ export function mount(el, { enter, logout }) {
   $('#a-theme').onclick = (e) => { const n = toggleTheme(); e.currentTarget.innerHTML = icon(n === 'dark' ? 'sun' : 'moon'); };
   $('#a-refresh').onclick = () => { stats = {}; load(); };
   $('#a-search').oninput = debounce((e) => { search = e.target.value; render(); }, 120);
-  $('#a-csv').onclick = () => download('sedes-sano-condominio.csv', toCSV([['Sede', 'Usuario', 'Correo', 'Estado', 'Plan', 'Pagado hasta', 'Dueño', 'Teléfono', 'Cobrado hoy', 'Citas hoy', 'Creada'],
-    ...tenants.map((t) => [t.name, t.code, t.ownerEmail, status(t).label, t.plan || '', t.paidUntil ? fmtDate(new Date(ms(t.paidUntil)).toISOString()) : '', t.ownerName || '', t.ownerPhone || '', (stats[t.id]?.total || 0).toFixed(2), stats[t.id]?.open ?? '', fmtDate(t.createdAt)])]));
+  $('#a-csv').onclick = () => download('sedes-sano-condominio.csv', toCSV([['Sede', 'Usuario', 'Correo', 'Estado', 'Plan', 'Pagado hasta', 'Dueño', 'Teléfono', 'Cobrado hoy', 'Cobros hoy', 'Creada'],
+    ...tenants.map((t) => [t.name, t.code, t.ownerEmail, status(t).label, t.plan || '', t.paidUntil ? fmtDate(new Date(ms(t.paidUntil)).toISOString()) : '', t.ownerName || '', t.ownerPhone || '', (stats[t.id]?.total || 0).toFixed(2), stats[t.id]?.count ?? 0, fmtDate(t.createdAt)])]));
   load();
   return () => { alive = false; };
 }
